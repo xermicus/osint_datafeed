@@ -2,54 +2,57 @@ import redis, time
 from twython import Twython
 from twython import TwythonStreamer
 
+# Getting the databse ready
 r = redis.StrictRedis(host='172.17.0.2', port=6379, password='letmeinplease', charset="utf-8", decode_responses=True)
 r.setnx('pk',0)
-r.setnx('keyword','unset')
 
+# Getting Twitter API ready
 TAPIKEY = ''
-TAPISECRET = ''
+TAPIKEYSECRET = ''
 TACCESSTOKEN = ''
 TACCESSTOKENSECRET = ''
+twitter = Twython(TAPIKEY, TAPIKEYSECRET, oauth_version=2)
+ACCESSTOKEN = twitter.obtain_access_token()
+twitter = Twython(TAPIKEY, access_token=ACCESSTOKEN)
 
-#TACCESSTOKEN2 = ''
-#twitter = Twython(TAPIKEY, access_token=TACCESSTOKEN2)
+def addrecord(text, location, lang):
+	r.incr('pk')
+	pk = str(r.get('pk'))
+	r.hmset(pk, {'text':text, 'class':'new', 'location':location, 'score':0, 'lang':lang})
+	r.sadd('new', pk)
 
 class TDataStream(TwythonStreamer):
 	def on_success(self, data):
-		values = []
-		#todo: increment pk and add values to database
 		if 'text' in data:
-			txt = data['text'].encode('utf-8')
-			values.append('text:   ' + str(txt))
-		if 'user' in data:
-			location = data['user']['location']
-			lang = data['user']['lang']
-			values.append('loc:    ' + str(location))
-			values.append('lang:   ' + str(lang))
+			txt = str(data['text'].encode('utf-8'))
+			if 'user' in data:
+				location = str(data['user']['location'])
+				lang = str(data['user']['lang'])
+				if 'place' in data and data['place'] is not None:
+					fullname = str(data['place']['full_name'])
+					country = str(data['place']['country'])
+					addrecord(txt, fullname, lang)
+
 		if 'coordinates' in data:
 			cor = data['coordinates']
-			values.append('coord:  ' + str(cor))
-		if 'place' in data and data['place'] is not None:
-			fullname = data['place']['full_name']
-			country = data['place']['country']
-			values.append('fname:  ' + str(fullname))
-			values.append('cntry:  ' + str(country))
 		
-		for val in values:
-			print(val)
-
-		if keyword != r.get('keyword'):
+		if keyword != str(r.get('keyword')):
 			self.disconnect()
+
 
 	def on_error(self, status_code, data):
 		print(status_code)
 		self.disconnect()
 
-streamer = TDataStream(TAPIKEY, TAPISECRET, TACCESSTOKEN, TACCESSTOKENSECRET)
+
+streamer = TDataStream(TAPIKEY, TAPIKEYSECRET, TACCESSTOKEN, TACCESSTOKENSECRET)
 
 while True:
-	keyword = r.get('keyword')
+	keyword = str(r.get('keyword'))
 	if keyword is not None and keyword != 'unset':
-		streamer.statuses.filter(track = keyword)
+		streamer.statuses.filter(track=keyword)
+		print('sleeping 60 seconds to avoid getting rate limited')
+		time.sleep(60)
 	else:
-		time.sleep(0.5)
+		print('keyword is not set.. retrying in a second')
+		time.sleep(1)
